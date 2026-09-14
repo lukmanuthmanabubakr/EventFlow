@@ -1,0 +1,153 @@
+{
+  "OrderPlaced": {
+    "publishedBy": "order-service",
+    "consumedBy": ["inventory-service", "notification-service"],
+    "description": "Fired the moment POST /orders succeeds and the order is saved as pending.",
+    "shape": {
+      "eventId": "uuid",
+      "eventType": "OrderPlaced",
+      "correlationId": "uuid",
+      "timestamp": "ISO8601",
+      "data": {
+        "orderId": "uuid",
+        "items": [
+          { "productId": "uuid", "quantity": 2 }
+        ]
+      }
+    }
+  },
+
+  "InventoryReserved": {
+    "publishedBy": "inventory-service",
+    "consumedBy": ["order-service", "notification-service"],
+    "description": "Fired when stock is successfully checked and held for every line item on the order.",
+    "shape": {
+      "eventId": "uuid",
+      "eventType": "InventoryReserved",
+      "correlationId": "uuid",
+      "timestamp": "ISO8601",
+      "data": {
+        "orderId": "uuid",
+        "reservedItems": [
+          { "productId": "uuid", "quantity": 2 }
+        ]
+      }
+    }
+  },
+
+  "InventoryFailed": {
+    "publishedBy": "inventory-service",
+    "consumedBy": ["order-service", "notification-service"],
+    "description": "Fired when stock cannot be reserved, either genuinely out of stock or via the Week 6 chaos-failure injection.",
+    "shape": {
+      "eventId": "uuid",
+      "eventType": "InventoryFailed",
+      "correlationId": "uuid",
+      "timestamp": "ISO8601",
+      "data": {
+        "orderId": "uuid",
+        "reason": "string"
+      }
+    }
+  },
+
+  "PaymentSucceeded": {
+    "publishedBy": "order-service",
+    "consumedBy": ["notification-service"],
+    "description": "Fired by the fake payment function in Week 2, real saga logic wired in during Week 6.",
+    "shape": {
+      "eventId": "uuid",
+      "eventType": "PaymentSucceeded",
+      "correlationId": "uuid",
+      "timestamp": "ISO8601",
+      "data": {
+        "orderId": "uuid",
+        "amount": 4599
+      }
+    }
+  },
+
+  "PaymentFailed": {
+    "publishedBy": "order-service",
+    "consumedBy": ["notification-service"],
+    "description": "Fired when the fake/real payment step fails outright, before inventory is even touched.",
+    "shape": {
+      "eventId": "uuid",
+      "eventType": "PaymentFailed",
+      "correlationId": "uuid",
+      "timestamp": "ISO8601",
+      "data": {
+        "orderId": "uuid",
+        "reason": "string"
+      }
+    }
+  },
+
+  "PaymentRefunded": {
+    "publishedBy": "order-service",
+    "consumedBy": ["notification-service"],
+    "description": "The Week 6 compensation event — fired when payment already succeeded but inventory failed afterward, undoing the charge.",
+    "shape": {
+      "eventId": "uuid",
+      "eventType": "PaymentRefunded",
+      "correlationId": "uuid",
+      "timestamp": "ISO8601",
+      "data": {
+        "orderId": "uuid",
+        "amount": 4599
+      }
+    }
+  },
+
+  "ReservationExpired": {
+    "publishedBy": "inventory-service",
+    "consumedBy": ["order-service", "notification-service"],
+    "description": "Fired automatically when a 15-minute stock hold times out without payment confirming, Week 6.",
+    "shape": {
+      "eventId": "uuid",
+      "eventType": "ReservationExpired",
+      "correlationId": "uuid",
+      "timestamp": "ISO8601",
+      "data": {
+        "orderId": "uuid"
+      }
+    }
+  },
+
+  "OrderCancelled": {
+    "publishedBy": "order-service",
+    "consumedBy": ["inventory-service", "notification-service"],
+    "description": "The terminal failure event — fired on inventory failure, payment failure, or reservation expiry, anything that ends the order.",
+    "shape": {
+      "eventId": "uuid",
+      "eventType": "OrderCancelled",
+      "correlationId": "uuid",
+      "timestamp": "ISO8601",
+      "data": {
+        "orderId": "uuid",
+        "reason": "string"
+      }
+    }
+  },
+
+  "OrderPartiallyFulfilled": {
+    "publishedBy": "inventory-service",
+    "consumedBy": ["order-service", "notification-service"],
+    "description": "Added in Week 7 if the partial-fulfillment policy is ship-what-you-have. Carries which items shipped and which didn't.",
+    "shape": {
+      "eventId": "uuid",
+      "eventType": "OrderPartiallyFulfilled",
+      "correlationId": "uuid",
+      "timestamp": "ISO8601",
+      "data": {
+        "orderId": "uuid",
+        "fulfilledItems": [
+          { "productId": "uuid", "quantity": 2 }
+        ],
+        "backorderedItems": [
+          { "productId": "uuid", "quantity": 1 }
+        ]
+      }
+    }
+  }
+}
