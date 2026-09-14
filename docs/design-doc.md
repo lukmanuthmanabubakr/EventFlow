@@ -17,8 +17,8 @@ No service ever calls another service directly, over HTTP or otherwise.
                            v                           v
                     +------------------------------------------+
                     |                RabbitMQ                  |
-                    |             (message broker)              |
-                    +--------------------------------------------+
+                    |             (message broker)             |
+                    +------------------------------------------+
 ```
 
 **Rule:** every line in this diagram terminates at RabbitMQ. There is no
