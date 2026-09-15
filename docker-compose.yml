@@ -1,0 +1,122 @@
+version: "3.9"
+
+services:
+  # ---------- Message broker ----------
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: eventflow-rabbitmq
+    ports:
+      - "5672:5672"    # AMQP port, services connect here
+      - "15672:15672"  # management UI, browse to http://localhost:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: eventflow
+      RABBITMQ_DEFAULT_PASS: change_me_locally
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  # ---------- Order Service + its own database ----------
+  order-db:
+    image: postgres:16
+    container_name: eventflow-order-db
+    environment:
+      POSTGRES_USER: order_user
+      POSTGRES_PASSWORD: change_me_locally
+      POSTGRES_DB: order_db
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U order_user -d order_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - order_db_data:/var/lib/postgresql/data
+
+  order-service:
+    build: ./order-service
+    container_name: eventflow-order-service
+    ports:
+      - "3001:3000"
+    environment:
+      DATABASE_URL: postgresql://order_user:change_me_locally@order-db:5432/order_db
+      RABBITMQ_URL: amqp://eventflow:change_me_locally@rabbitmq:5672
+    depends_on:
+      order-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # ---------- Inventory Service + its own database ----------
+  inventory-db:
+    image: postgres:16
+    container_name: eventflow-inventory-db
+    environment:
+      POSTGRES_USER: inventory_user
+      POSTGRES_PASSWORD: change_me_locally
+      POSTGRES_DB: inventory_db
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inventory_user -d inventory_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - inventory_db_data:/var/lib/postgresql/data
+
+  inventory-service:
+    build: ./inventory-service
+    container_name: eventflow-inventory-service
+    ports:
+      - "3002:3000"
+    environment:
+      DATABASE_URL: postgresql://inventory_user:change_me_locally@inventory-db:5432/inventory_db
+      RABBITMQ_URL: amqp://eventflow:change_me_locally@rabbitmq:5672
+    depends_on:
+      inventory-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  # ---------- Notification Service + its own database ----------
+  notification-db:
+    image: postgres:16
+    container_name: eventflow-notification-db
+    environment:
+      POSTGRES_USER: notification_user
+      POSTGRES_PASSWORD: change_me_locally
+      POSTGRES_DB: notification_db
+    ports:
+      - "5435:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notification_user -d notification_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - notification_db_data:/var/lib/postgresql/data
+
+  notification-service:
+    build: ./notification-service
+    container_name: eventflow-notification-service
+    ports:
+      - "3003:3000"
+    environment:
+      DATABASE_URL: postgresql://notification_user:change_me_locally@notification-db:5432/notification_db
+      RABBITMQ_URL: amqp://eventflow:change_me_locally@rabbitmq:5672
+    depends_on:
+      notification-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  rabbitmq_data:
+  order_db_data:
+  inventory_db_data:
+  notification_db_data:
