@@ -58,3 +58,33 @@ rebuilding this same pipeline on Kafka later is a strong way to learn
 what specifically changes in consumer behaviour, offset management, and
 delivery guarantees when the broker changes underneath the same event
 contract.
+
+## 3. Database Boundary Rule
+
+**No service reads or writes another service's database, under any
+circumstances. The only way one service learns about another service's
+state is through an event it received.**
+
+This is not a style preference. It is the hard constraint the entire
+EventFlow project exists to teach and enforce.
+
+Practically, this means:
+
+- Order Service never queries Inventory Service's `products` table
+  directly, even for something as simple as checking if a product exists.
+  It waits for `InventoryReserved` or `InventoryFailed` to find out.
+- Inventory Service never reads Order Service's `orders` table to check
+  an order's status. It only knows what it's told via events.
+- No service is ever given database credentials for another service's
+  database, not even read-only ones. This isn't just discipline, it's
+  enforced at the infrastructure level, three separate Postgres
+  instances, three separate connection strings, three separate `.env`
+  files.
+- If a service needs data it doesn't have, that's a signal the event
+  catalog is missing a field, not a reason to reach into another
+  service's database as a shortcut.
+
+Violating this rule is the single fastest way to turn EventFlow back
+into a regular monolith wearing three separate folders. The whole point
+is that these services genuinely don't trust or depend on each other's
+internal state, only on the events they've agreed to exchange.
