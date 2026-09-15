@@ -88,3 +88,34 @@ Violating this rule is the single fastest way to turn EventFlow back
 into a regular monolith wearing three separate folders. The whole point
 is that these services genuinely don't trust or depend on each other's
 internal state, only on the events they've agreed to exchange.
+
+## 4. Correlation ID Strategy
+
+A single UUID v4 is generated once, the moment `POST /orders` is called
+in Order Service. That ID is called the **correlation ID**, and it is
+stamped into every single event published about that order, from
+`OrderPlaced` all the way through to `OrderCancelled` or a successful
+completion.
+
+Rules:
+
+- The correlation ID is generated exactly once, at order creation. No
+  service ever generates a new one partway through the flow.
+- Every event in the catalog (see `docs/event-catalog.json`) carries
+  `correlationId` in its top-level shape, not buried inside `data`.
+- When a service consumes an event and publishes a new one in response
+  (e.g. Inventory Service receiving `OrderPlaced` and publishing
+  `InventoryReserved`), it copies the correlation ID forward unchanged.
+  It never generates its own.
+- This is what makes `GET /trace/:correlationId` in Notification Service
+  possible: pull every event ever logged under one correlation ID, sort
+  by timestamp, and the full lifecycle of one order is reconstructed
+  from three independent services with no shared database between them.
+
+This is a different ID from `orderId`. `orderId` identifies the order
+itself in Order Service's own database. `correlationId` identifies the
+*story* of that order as it moves across services. In this project they
+happen to map one-to-one (one order, one correlation ID), but keeping
+them conceptually separate matters once sagas or retries are introduced,
+where a single correlation ID might eventually need to span more than
+one order-level operation.
