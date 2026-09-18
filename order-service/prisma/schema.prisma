@@ -1,0 +1,41 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum OrderStatus {
+  pending
+  reserved
+  confirmed
+  partially_fulfilled
+  failed
+  cancelled
+}
+
+model Order {
+  id            String      @id @default(uuid())
+  correlationId String      @unique
+  items         Json // ProductLine[] — matches OrderPlaced.data.items in the event catalog
+  status        OrderStatus @default(pending)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([correlationId])
+}
+
+// Tracks every eventId this service has already processed —
+// this is the table the Week 5 idempotency checks read from.
+// A duplicate event with an eventId already in here gets skipped.
+model ProcessedEvent {
+  id          String   @id @default(uuid())
+  eventId     String   @unique
+  eventType   String
+  processedAt DateTime @default(now())
+}
