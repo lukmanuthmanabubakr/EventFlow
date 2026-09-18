@@ -1,0 +1,26 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// The entire point of notification-service: one row per event received,
+// across every event type in the catalog. This is what /trace/:correlationId
+// queries in Week 4 — every row matching a correlationId, sorted by
+// receivedAt, reconstructs one order's full lifecycle.
+model EventLog {
+  id            String   @id @default(uuid())
+  eventId       String   @unique
+  eventType     String
+  correlationId String
+  payload       Json
+  receivedAt    DateTime @default(now())
+
+  @@index([correlationId])
+}
