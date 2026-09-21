@@ -1,0 +1,30 @@
+openapi: 3.0.3
+info:
+  title: EventFlow — Inventory Service
+  description: >
+    Manages product stock and reservations. Listens for OrderPlaced,
+    publishes InventoryReserved / InventoryFailed. Endpoints will be
+    filled in as they're built, starting Week 3.
+  version: 0.1.0
+servers:
+  - url: http://localhost:5005
+    description: Local development
+tags:
+  - name: Health
+    description: Service liveness check
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Confirms the service is running
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok

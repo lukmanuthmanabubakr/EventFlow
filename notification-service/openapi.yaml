@@ -1,0 +1,30 @@
+openapi: 3.0.3
+info:
+  title: EventFlow — Notification Service
+  description: >
+    Logs every event in the system and exposes /trace/:correlationId to
+    reconstruct an order's full lifecycle. Endpoints will be filled in
+    starting Week 4.
+  version: 0.1.0
+servers:
+  - url: http://localhost:5006
+    description: Local development
+tags:
+  - name: Health
+    description: Service liveness check
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Confirms the service is running
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok

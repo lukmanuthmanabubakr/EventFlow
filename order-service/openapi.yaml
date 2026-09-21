@@ -1,0 +1,30 @@
+openapi: 3.0.3
+info:
+  title: EventFlow — Order Service
+  description: >
+    Handles order creation and lifecycle. Publishes OrderPlaced and listens
+    for InventoryReserved / InventoryFailed via RabbitMQ. Endpoints will be
+    filled in as they're built, starting Week 2.
+  version: 0.1.0
+servers:
+  - url: http://localhost:5004
+    description: Local development
+tags:
+  - name: Health
+    description: Service liveness check
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Confirms the service is running
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
