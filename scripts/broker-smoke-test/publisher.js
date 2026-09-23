@@ -6,7 +6,7 @@
 
 const amqp = require("amqplib");
 
-const RABBITMQ_URL = "amqp://eventflow:change_me_locally@localhost:5672";
+const RABBITMQ_URL = "amqp://eventflow:change_me_locally@127.0.0.1:5672";
 const QUEUE_NAME = "smoke-test-queue";
 
 async function publish() {

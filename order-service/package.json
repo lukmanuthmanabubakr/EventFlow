@@ -2,10 +2,11 @@
   "name": "order-service",
   "version": "1.0.0",
   "description": "",
-  "main": "server.js",
+  "main": "src/server.ts",
   "scripts": {
-    "dev": "nodemon server.js",
-    "start": "node server.js",
+    "dev": "nodemon --exec tsx src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -13,14 +14,23 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@scalar/express-api-reference": "^0.10.19",
+    "amqplib": "^2.0.1",
     "express": "^5.2.1",
-    "yamljs": "^0.3.0"
+    "uuid": "^14.0.2",
+    "yamljs": "^0.3.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.2",
+    "@types/yamljs": "^0.2.34",
     "dotenv": "^17.4.2",
     "nodemon": "^3.1.14",
-    "prisma": "^7.10.0"
+    "prisma": "^7.10.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
   }
 }
