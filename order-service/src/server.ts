@@ -9,6 +9,7 @@ import { apiReference } from "@scalar/express-api-reference";
 import YAML from "yamljs";
 import path from "path";
 import { connectRabbitMQ } from "./config/rabbitmq";
+import { startOrderConsumers } from "./consumers/orders.consumer";
 import ordersRouter from "./routes/orders.routes";
 
 const app = express();
@@ -33,6 +34,7 @@ app.use(ordersRouter);
 
 async function start() {
   await connectRabbitMQ();
+  await startOrderConsumers();
 
   app.listen(PORT, () => {
     console.log(`Order Service running on http://localhost:${PORT}`);
