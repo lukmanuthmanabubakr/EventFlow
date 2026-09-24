@@ -20,3 +20,10 @@ export const createOrderSchema = z.object({
 // Derived type — matches ProductLine/CreateOrderInput in types/index.ts,
 // generated automatically from the schema above instead of hand-written.
 export type CreateOrderRequest = z.infer<typeof createOrderSchema>;
+
+// Validates the :id route param on GET /orders/:id. Catches malformed
+// input (e.g. "abc") before it ever reaches Prisma, so a bad request
+// returns a clean 400 instead of an unhandled database error.
+export const orderIdParamSchema = z.object({
+  id: z.string().uuid("id must be a valid UUID"),
+});

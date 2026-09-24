@@ -3,15 +3,16 @@ info:
   title: EventFlow — Order Service
   description: >
     Handles order creation and lifecycle. Publishes OrderPlaced and listens
-    for InventoryReserved / InventoryFailed via RabbitMQ. Endpoints will be
-    filled in as they're built, starting Week 2.
-  version: 0.1.0
+    for InventoryReserved / InventoryFailed via RabbitMQ.
+  version: 0.2.0
 servers:
   - url: http://localhost:5004
     description: Local development
 tags:
   - name: Health
     description: Service liveness check
+  - name: Orders
+    description: Order creation and lookup
 paths:
   /health:
     get:
@@ -28,3 +29,113 @@ paths:
                   status:
                     type: string
                     example: ok
+
+  /orders:
+    post:
+      tags: [Orders]
+      summary: Create a new order
+      description: >
+        Validates the request, saves the order as "pending", and publishes
+        an OrderPlaced event onto RabbitMQ with a fresh correlation ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [productId, quantity]
+                    properties:
+                      productId:
+                        type: string
+                        example: prod-123
+                      quantity:
+                        type: integer
+                        minimum: 1
+                        example: 2
+      responses:
+        "201":
+          description: Order created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  order:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      correlationId:
+                        type: string
+                        format: uuid
+                      status:
+                        type: string
+                        example: pending
+                      createdAt:
+                        type: string
+                        format: date-time
+        "400":
+          description: Invalid request body
+
+  /orders/{id}:
+    get:
+      tags: [Orders]
+      summary: Look up an order by id
+      description: >
+        Returns the current state of an order — useful for watching status
+        change live as InventoryReserved/InventoryFailed events arrive.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Order found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  order:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      correlationId:
+                        type: string
+                        format: uuid
+                      status:
+                        type: string
+                        example: confirmed
+                      items:
+                        type: array
+                        items:
+                          type: object
+                      createdAt:
+                        type: string
+                        format: date-time
+                      updatedAt:
+                        type: string
+                        format: date-time
+        "400":
+          description: id is not a valid UUID
+        "404":
+          description: Order not found
