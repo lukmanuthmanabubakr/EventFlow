@@ -22,3 +22,25 @@ export interface OrderPlacedPayload {
     items: ProductLine[];
   };
 }
+
+export interface PaymentSucceededPayload {
+  eventId: string;
+  eventType: "PaymentSucceeded";
+  correlationId: string;
+  timestamp: string;
+  data: {
+    orderId: string;
+    amount: number;
+  };
+}
+
+export interface PaymentFailedPayload {
+  eventId: string;
+  eventType: "PaymentFailed";
+  correlationId: string;
+  timestamp: string;
+  data: {
+    orderId: string;
+    reason: string;
+  };
+}
