@@ -2,9 +2,12 @@ openapi: 3.0.3
 info:
   title: EventFlow — Order Service
   description: >
-    Handles order creation and lifecycle. Publishes OrderPlaced and listens
-    for InventoryReserved / InventoryFailed via RabbitMQ.
-  version: 0.2.0
+    Handles order creation and lifecycle. Publishes OrderPlaced,
+    PaymentSucceeded/PaymentFailed, and listens for InventoryReserved /
+    InventoryFailed via RabbitMQ. This spec documents the HTTP surface
+    only — for the full async event flow and payload shapes, see
+    docs/event-catalog.json at the repo root.
+  version: 0.3.0
 servers:
   - url: http://localhost:5004
     description: Local development
@@ -35,8 +38,11 @@ paths:
       tags: [Orders]
       summary: Create a new order
       description: >
-        Validates the request, saves the order as "pending", and publishes
-        an OrderPlaced event onto RabbitMQ with a fresh correlation ID.
+        Validates the request, saves the order as "pending", publishes an
+        OrderPlaced event with a fresh correlation ID, then runs a
+        (currently simulated) payment step, publishing PaymentSucceeded
+        or PaymentFailed. A failed payment sets the order's status to
+        "failed" immediately — real saga/rollback logic is Week 6's job.
       requestBody:
         required: true
         content:
@@ -59,6 +65,10 @@ paths:
                         type: integer
                         minimum: 1
                         example: 2
+            example:
+              items:
+                - productId: prod-123
+                  quantity: 2
       responses:
         "201":
           description: Order created
@@ -85,8 +95,40 @@ paths:
                       createdAt:
                         type: string
                         format: date-time
+              example:
+                status: ok
+                order:
+                  id: 94c585db-0ffb-4565-8a64-f25db10fa5cf
+                  correlationId: 40201216-b144-4383-9edb-175e9f3b3daa
+                  status: pending
+                  createdAt: "2026-09-23T09:23:18.866Z"
         "400":
-          description: Invalid request body
+          description: Invalid request body (e.g. missing or empty items array)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                  issues:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path:
+                          type: string
+                        message:
+                          type: string
+              example:
+                status: error
+                message: Invalid request body
+                issues:
+                  - path: items
+                    message: "Invalid input: expected array, received undefined"
 
   /orders/{id}:
     get:
@@ -94,7 +136,8 @@ paths:
       summary: Look up an order by id
       description: >
         Returns the current state of an order — useful for watching status
-        change live as InventoryReserved/InventoryFailed events arrive.
+        change live as PaymentSucceeded/PaymentFailed and
+        InventoryReserved/InventoryFailed events arrive.
       parameters:
         - name: id
           in: path
@@ -135,7 +178,57 @@ paths:
                       updatedAt:
                         type: string
                         format: date-time
+              example:
+                status: ok
+                order:
+                  id: 94c585db-0ffb-4565-8a64-f25db10fa5cf
+                  correlationId: 40201216-b144-4383-9edb-175e9f3b3daa
+                  items:
+                    - productId: prod-999
+                      quantity: 1
+                  status: pending
+                  createdAt: "2026-09-23T09:23:18.866Z"
+                  updatedAt: "2026-09-23T09:23:18.866Z"
         "400":
           description: id is not a valid UUID
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                  issues:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path:
+                          type: string
+                        message:
+                          type: string
+              example:
+                status: error
+                message: Invalid order id
+                issues:
+                  - path: id
+                    message: id must be a valid UUID
         "404":
-          description: Order not found
+          description: No order exists with this id
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                    example: Order not found
+              example:
+                status: error
+                message: Order not found
