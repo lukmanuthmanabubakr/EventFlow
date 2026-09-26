@@ -3,15 +3,18 @@ info:
   title: EventFlow — Inventory Service
   description: >
     Manages product stock and reservations. Listens for OrderPlaced,
-    publishes InventoryReserved / InventoryFailed. Endpoints will be
-    filled in as they're built, starting Week 3.
-  version: 0.1.0
+    publishes InventoryReserved / InventoryFailed. This spec documents
+    the HTTP surface only — for the full async event flow, see
+    docs/event-catalog.json at the repo root.
+  version: 0.2.0
 servers:
   - url: http://localhost:5005
     description: Local development
 tags:
   - name: Health
     description: Service liveness check
+  - name: Products
+    description: Product creation and lookup — the data Order Service's items array references
 paths:
   /health:
     get:
@@ -28,3 +31,151 @@ paths:
                   status:
                     type: string
                     example: ok
+
+  /products:
+    post:
+      tags: [Products]
+      summary: Create a new product
+      description: >
+        Creates a product with a real price and stock count. No hardcoded
+        or placeholder values are accepted — price and quantityAvailable
+        must be explicitly provided by the caller.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, price, quantityAvailable]
+              properties:
+                name:
+                  type: string
+                  example: Wireless Mouse
+                price:
+                  type: integer
+                  description: Price in cents
+                  minimum: 1
+                  example: 2499
+                quantityAvailable:
+                  type: integer
+                  minimum: 0
+                  example: 50
+            example:
+              name: Wireless Mouse
+              price: 2499
+              quantityAvailable: 50
+      responses:
+        "201":
+          description: Product created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  product:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      name:
+                        type: string
+                      price:
+                        type: integer
+                      quantityAvailable:
+                        type: integer
+                      quantityReserved:
+                        type: integer
+                      createdAt:
+                        type: string
+                        format: date-time
+                      updatedAt:
+                        type: string
+                        format: date-time
+              example:
+                status: ok
+                product:
+                  id: 70d077d2-2fd6-4178-bd50-b670f174e360
+                  name: Wireless Mouse
+                  price: 2499
+                  quantityAvailable: 50
+                  quantityReserved: 0
+                  createdAt: "2026-09-26T23:32:21.671Z"
+                  updatedAt: "2026-09-26T23:32:21.671Z"
+        "400":
+          description: Invalid request body (e.g. negative price, missing name)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: error
+                  message:
+                    type: string
+                  issues:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path:
+                          type: string
+                        message:
+                          type: string
+              example:
+                status: error
+                message: Invalid request body
+                issues:
+                  - path: price
+                    message: "price must be a positive integer (cents)"
+
+    get:
+      tags: [Products]
+      summary: List all products
+      description: >
+        Returns every product, oldest first. Useful for a tester or client
+        to see real product IDs and prices to order against.
+      responses:
+        "200":
+          description: List of products
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  products:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        name:
+                          type: string
+                        price:
+                          type: integer
+                        quantityAvailable:
+                          type: integer
+                        quantityReserved:
+                          type: integer
+              example:
+                status: ok
+                products:
+                  - id: 69002a34-146c-4517-8e3a-39f82e0154c0
+                    name: Wireless Mouse
+                    price: 2499
+                    quantityAvailable: 50
+                    quantityReserved: 0
+                  - id: d297c43b-5884-4ea2-b958-e5519dfdedf4
+                    name: 27-inch Monitor
+                    price: 24999
+                    quantityAvailable: 0
+                    quantityReserved: 0
