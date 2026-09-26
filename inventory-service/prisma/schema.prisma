@@ -13,14 +13,13 @@ datasource db {
 model Product {
   id                String   @id @default(uuid())
   name              String
+  price             Int
   quantityAvailable Int      @default(0)
   quantityReserved  Int      @default(0)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }
 
-// Tracks every eventId this service has already processed —
-// same idempotency pattern as order-service, for Week 5.
 model ProcessedEvent {
   id          String   @id @default(uuid())
   eventId     String   @unique
