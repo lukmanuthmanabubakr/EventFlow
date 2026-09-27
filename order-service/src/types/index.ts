@@ -6,6 +6,7 @@
 export interface ProductLine {
   productId: string;
   quantity: number;
+  unitPrice: number; // in cents — supplied by the client, taken from a real GET /products lookup
 }
 
 export interface CreateOrderInput {

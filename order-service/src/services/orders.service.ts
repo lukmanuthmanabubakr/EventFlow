@@ -41,9 +41,19 @@ export async function createOrder(input: CreateOrderInput) {
 
   await publishEvent("OrderPlaced", orderPlacedPayload);
 
-  // Fake payment step — no real pricing exists yet, so this is a
-  // placeholder amount, not a calculated total. Real payment/saga logic
-  // replaces this entirely in Week 6.
+  // Real total, computed from what the client submitted — each item's
+  // unitPrice comes from a real GET /products lookup the client made
+  // beforehand. Known limitation: Order Service trusts this price as
+  // given, it does not re-verify it against Inventory Service's actual
+  // data. Real cross-service price verification would need an event
+  // round-trip and overlaps with Week 6's saga work — accepted as a
+  // deliberate simplification for now, not silently ignored.
+  const totalAmount = input.items.reduce(
+    (sum, item) => sum + item.quantity * item.unitPrice,
+    0
+  );
+
+  // Fake payment step — real payment/saga logic replaces this in Week 6.
   const paymentResult = await simulatePayment();
 
   if (paymentResult.success) {
@@ -54,7 +64,7 @@ export async function createOrder(input: CreateOrderInput) {
       timestamp: new Date().toISOString(),
       data: {
         orderId: order.id,
-        amount: 4999, // placeholder — no real pricing yet
+        amount: totalAmount,
       },
     };
 
