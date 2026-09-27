@@ -9,6 +9,10 @@ import { z } from "zod";
 export const productLineSchema = z.object({
   productId: z.string().min(1, "productId is required"),
   quantity: z.number().int().positive("quantity must be a positive integer"),
+  unitPrice: z
+    .number()
+    .int()
+    .positive("unitPrice must be a positive integer (cents)"),
 });
 
 export const createOrderSchema = z.object({

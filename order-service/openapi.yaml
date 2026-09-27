@@ -7,7 +7,7 @@ info:
     InventoryFailed via RabbitMQ. This spec documents the HTTP surface
     only — for the full async event flow and payload shapes, see
     docs/event-catalog.json at the repo root.
-  version: 0.3.0
+  version: 0.4.0
 servers:
   - url: http://localhost:5004
     description: Local development
@@ -41,8 +41,15 @@ paths:
         Validates the request, saves the order as "pending", publishes an
         OrderPlaced event with a fresh correlation ID, then runs a
         (currently simulated) payment step, publishing PaymentSucceeded
-        or PaymentFailed. A failed payment sets the order's status to
-        "failed" immediately — real saga/rollback logic is Week 6's job.
+        or PaymentFailed. The payment amount is computed dynamically as
+        sum(quantity * unitPrice) across all items — unitPrice must be a
+        real price the client obtained from GET /products on Inventory
+        Service beforehand. Order Service trusts this price as given; it
+        does not re-verify it against Inventory Service's actual data —
+        a deliberate simplification until real cross-service
+        verification is designed as part of Week 6's saga work. A failed
+        payment sets the order's status to "failed" immediately — real
+        saga/rollback logic is also Week 6's job.
       requestBody:
         required: true
         content:
@@ -56,19 +63,28 @@ paths:
                   minItems: 1
                   items:
                     type: object
-                    required: [productId, quantity]
+                    required: [productId, quantity, unitPrice]
                     properties:
                       productId:
                         type: string
-                        example: prod-123
+                        example: 9e1a9de6-09ad-41c8-a5cd-6691490888f4
                       quantity:
                         type: integer
                         minimum: 1
                         example: 2
+                      unitPrice:
+                        type: integer
+                        description: >
+                          Price per unit in cents, taken from GET /products.
+                          Not verified server-side against Inventory
+                          Service — see the endpoint description above.
+                        minimum: 1
+                        example: 8999
             example:
               items:
-                - productId: prod-123
+                - productId: 9e1a9de6-09ad-41c8-a5cd-6691490888f4
                   quantity: 2
+                  unitPrice: 8999
       responses:
         "201":
           description: Order created
@@ -98,12 +114,12 @@ paths:
               example:
                 status: ok
                 order:
-                  id: 94c585db-0ffb-4565-8a64-f25db10fa5cf
-                  correlationId: 40201216-b144-4383-9edb-175e9f3b3daa
+                  id: bbaa87b9-d1f5-4c16-a9a2-bade93c0ed4f
+                  correlationId: 11226401-7567-480e-8fe3-835d3730f873
                   status: pending
-                  createdAt: "2026-09-23T09:23:18.866Z"
+                  createdAt: "2026-09-27T21:45:31.977Z"
         "400":
-          description: Invalid request body (e.g. missing or empty items array)
+          description: Invalid request body (e.g. missing items, missing unitPrice)
           content:
             application/json:
               schema:
@@ -181,14 +197,15 @@ paths:
               example:
                 status: ok
                 order:
-                  id: 94c585db-0ffb-4565-8a64-f25db10fa5cf
-                  correlationId: 40201216-b144-4383-9edb-175e9f3b3daa
+                  id: bbaa87b9-d1f5-4c16-a9a2-bade93c0ed4f
+                  correlationId: 11226401-7567-480e-8fe3-835d3730f873
                   items:
-                    - productId: prod-999
-                      quantity: 1
+                    - productId: 9e1a9de6-09ad-41c8-a5cd-6691490888f4
+                      quantity: 2
+                      unitPrice: 8999
                   status: pending
-                  createdAt: "2026-09-23T09:23:18.866Z"
-                  updatedAt: "2026-09-23T09:23:18.866Z"
+                  createdAt: "2026-09-27T21:45:31.977Z"
+                  updatedAt: "2026-09-27T21:45:31.977Z"
         "400":
           description: id is not a valid UUID
           content:
