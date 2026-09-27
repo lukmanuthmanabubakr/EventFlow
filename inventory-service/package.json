@@ -17,6 +17,7 @@
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@scalar/express-api-reference": "^0.10.19",
+    "amqplib": "^2.1.0",
     "express": "^5.2.1",
     "yamljs": "^0.3.0",
     "zod": "^4.6.5"
