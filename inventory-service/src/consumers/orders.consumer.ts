@@ -1,12 +1,13 @@
 // consumers/orders.consumer.ts
 //
-// Reacts to OrderPlaced events. Checks stock for every line item, and
-// either reserves all of it atomically or fails the whole order — no
-// partial reservations. Publishing InventoryReserved/InventoryFailed is
-// the next task; for now this proves the decision logic and DB update.
+// Reacts to OrderPlaced events. Checks stock for every line item, reserves
+// atomically or fails the whole order, then announces the outcome by
+// publishing InventoryReserved or InventoryFailed — correlationId is
+// threaded through unchanged from the triggering OrderPlaced event.
 
+import { v4 as uuidv4 } from "uuid";
 import prisma from "../config/database";
-import { subscribeToEvents } from "../config/rabbitmq";
+import { publishEvent, subscribeToEvents } from "../config/rabbitmq";
 
 interface OrderLineItem {
   productId: string;
@@ -55,9 +56,7 @@ async function handleOrderPlaced(payload: unknown): Promise<void> {
         const product = productById.get(item.productId);
 
         if (!product) {
-          throw new Error(
-            `Product ${item.productId} does not exist`
-          );
+          throw new Error(`Product ${item.productId} does not exist`);
         }
 
         if (product.quantityAvailable < item.quantity) {
@@ -82,11 +81,33 @@ async function handleOrderPlaced(payload: unknown): Promise<void> {
     console.log(
       `RESERVE — order ${orderId} (correlationId ${correlationId}): all ${items.length} item(s) reserved successfully.`
     );
+
+    await publishEvent("InventoryReserved", {
+      eventId: uuidv4(),
+      eventType: "InventoryReserved",
+      correlationId,
+      timestamp: new Date().toISOString(),
+      data: {
+        orderId,
+        reservedItems: items,
+      },
+    });
   } catch (err) {
     const reason = err instanceof Error ? err.message : "Unknown error";
     console.log(
       `FAIL — order ${orderId} (correlationId ${correlationId}): ${reason}. No stock was changed.`
     );
+
+    await publishEvent("InventoryFailed", {
+      eventId: uuidv4(),
+      eventType: "InventoryFailed",
+      correlationId,
+      timestamp: new Date().toISOString(),
+      data: {
+        orderId,
+        reason,
+      },
+    });
   }
 }
 
