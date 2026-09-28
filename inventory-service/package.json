@@ -19,12 +19,14 @@
     "@scalar/express-api-reference": "^0.10.19",
     "amqplib": "^2.1.0",
     "express": "^5.2.1",
+    "uuid": "^14.0.2",
     "yamljs": "^0.3.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.3",
+    "@types/uuid": "^10.0.0",
     "@types/yamljs": "^0.2.34",
     "dotenv": "^18.0.4",
     "nodemon": "^3.1.14",
