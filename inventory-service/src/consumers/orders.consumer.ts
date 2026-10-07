@@ -2,9 +2,9 @@
 //
 // Reacts to OrderPlaced and OrderCancelled.
 //
-// OrderPlaced: checks stock for every line item, reserves atomically or
-// fails the whole order, records what was reserved in OrderReservation,
-// then announces the outcome (InventoryReserved / InventoryFailed).
+// OrderPlaced: reserves stock for every line item atomically, or fails the
+// whole order, records what was reserved in OrderReservation, then announces
+// the outcome (InventoryReserved / InventoryFailed).
 //
 // OrderCancelled: looks up what THIS order actually reserved (from our own
 // OrderReservation record, not from the event payload) and releases exactly
@@ -54,6 +54,22 @@ function isOrderCancelledPayload(
   );
 }
 
+// One order may list the same product on several lines. Reserve the total,
+// not each line separately, and return the lines sorted by productId. Every
+// transaction touches product rows in that same order, so two multi-item
+// orders on overlapping products can never wait on each other in a cycle.
+function mergeAndSortLines(items: OrderLineItem[]): OrderLineItem[] {
+  const totals = new Map<string, number>();
+
+  for (const item of items) {
+    totals.set(item.productId, (totals.get(item.productId) ?? 0) + item.quantity);
+  }
+
+  return [...totals.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([productId, quantity]) => ({ productId, quantity }));
+}
+
 async function handleOrderPlaced(payload: unknown): Promise<void> {
   if (!isOrderPlacedPayload(payload)) {
     console.error("Malformed OrderPlaced payload, skipping:", payload);
@@ -66,6 +82,8 @@ async function handleOrderPlaced(payload: unknown): Promise<void> {
   let outcome: "reserved" | "duplicate";
 
   try {
+    const lines = mergeAndSortLines(items);
+
     outcome = await prisma.$transaction(async (tx) => {
       // If this order already has a reservation, this is a duplicate
       // delivery. Reserving again would double-count the stock, so skip.
@@ -77,38 +95,38 @@ async function handleOrderPlaced(payload: unknown): Promise<void> {
         return "duplicate" as const;
       }
 
-      // Fetch every referenced product inside the transaction, so the
-      // stock numbers we check are the numbers we then update.
-      const products = await tx.product.findMany({
-        where: { id: { in: items.map((item) => item.productId) } },
-      });
-
-      const productById = new Map(products.map((p) => [p.id, p]));
-
-      // Check EVERY item before changing anything. All-or-nothing.
-      for (const item of items) {
-        const product = productById.get(item.productId);
-
-        if (!product) {
-          throw new Error(`Product ${item.productId} does not exist`);
-        }
-
-        if (product.quantityAvailable < item.quantity) {
-          throw new Error(
-            `Insufficient stock for ${product.name} (${item.productId}): requested ${item.quantity}, available ${product.quantityAvailable}`
-          );
-        }
-      }
-
-      // Every item passed — reserve all of them together.
-      for (const item of items) {
-        await tx.product.update({
-          where: { id: item.productId },
+      // Check and reserve in ONE statement per product. The WHERE clause
+      // makes the stock check part of the UPDATE itself: Postgres locks the
+      // row, so a concurrent order waits, then re-checks against the
+      // committed value. If the stock is gone it matches zero rows and
+      // changes nothing. There is no gap between check and reserve.
+      for (const line of lines) {
+        const result = await tx.product.updateMany({
+          where: {
+            id: line.productId,
+            quantityAvailable: { gte: line.quantity },
+          },
           data: {
-            quantityAvailable: { decrement: item.quantity },
-            quantityReserved: { increment: item.quantity },
+            quantityAvailable: { decrement: line.quantity },
+            quantityReserved: { increment: line.quantity },
           },
         });
+
+        if (result.count === 0) {
+          // Read the product only to explain WHY it failed. Throwing rolls
+          // back every earlier line of this order: all-or-nothing.
+          const product = await tx.product.findUnique({
+            where: { id: line.productId },
+          });
+
+          if (!product) {
+            throw new Error(`Product ${line.productId} does not exist`);
+          }
+
+          throw new Error(
+            `Insufficient stock for ${product.name} (${line.productId}): requested ${line.quantity}, available ${product.quantityAvailable}`
+          );
+        }
       }
 
       // Record what this order reserved, in the same transaction, so the
@@ -117,10 +135,7 @@ async function handleOrderPlaced(payload: unknown): Promise<void> {
         data: {
           correlationId,
           orderId,
-          items: items.map((i) => ({
-            productId: i.productId,
-            quantity: i.quantity,
-          })),
+          items: lines.map((l) => ({ productId: l.productId, quantity: l.quantity })),
           status: "reserved",
         },
       });
