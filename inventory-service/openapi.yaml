@@ -1,12 +1,168 @@
 openapi: 3.0.3
 info:
   title: EventFlow — Inventory Service
-  description: >
-    Manages product stock and reservations. Listens for OrderPlaced,
-    publishes InventoryReserved / InventoryFailed. This spec documents
-    the HTTP surface only — for the full async event flow, see
-    docs/event-catalog.json at the repo root.
-  version: 0.2.0
+  version: 0.3.0
+  description: |
+    ## Overview
+
+    The Inventory service owns product stock: it exposes HTTP endpoints to create and list products, and holds
+    `quantityAvailable` / `quantityReserved` per product. It reserves and releases stock in response to order events
+    on RabbitMQ and announces the outcome of every reservation attempt as an event.
+
+    The HTTP endpoints are documented under Paths below. The event contract is documented in this section; the
+    system-wide catalog is `docs/event-catalog.json` at the repo root.
+
+    ## Messaging topology
+
+    | Item | Value |
+    |------|-------|
+    | Exchange | `eventflow.events` (topic, durable) |
+    | Queue | `inventory-service.order-events` (durable) |
+    | Bindings | `OrderPlaced`, `OrderCancelled` |
+    | Routing key | Equal to the event type, for both consumed and published events |
+    | Published messages | JSON, `persistent: true` |
+    | Acknowledgement | Every message is acked, including ones that fail processing. There is no retry and no dead-letter queue. |
+
+    ## Events consumed
+
+    | Event | Fields read | Effect |
+    |-------|-------------|--------|
+    | `OrderPlaced` | `correlationId`, `data.orderId`, `data.items[].productId`, `data.items[].quantity` | Reserves stock; publishes `InventoryReserved` or `InventoryFailed` |
+    | `OrderCancelled` | `correlationId` only | Releases the stock recorded for that order; publishes nothing |
+
+    ## Events published
+
+    | Event | When |
+    |-------|------|
+    | `InventoryReserved` | Every line of an `OrderPlaced` was reserved and the reservation record was written |
+    | `InventoryFailed` | The reservation transaction for an `OrderPlaced` threw for any reason; no stock was changed |
+
+    ## Behaviour
+
+    ### OrderPlaced
+
+    - Lines for the same `productId` are merged and their quantities summed before reserving.
+    - Merged lines are processed in sorted `productId` order, so concurrent multi-item orders always lock product rows in the same order and cannot deadlock.
+    - Each product is reserved with one guarded `UPDATE` (`WHERE id = ? AND quantityAvailable >= qty`) that decrements `quantityAvailable` and increments `quantityReserved`. There is no separate read-then-write.
+    - All lines run in one transaction. If any line matches zero rows, the transaction throws and rolls back: no stock changes for any line of that order.
+    - On success an `OrderReservation` row (`correlationId` unique, merged `items`, `status: reserved`) is written in the same transaction.
+    - If an `OrderReservation` already exists for the `correlationId` (whether `reserved` or `released`), the event is treated as a duplicate: nothing changes and nothing is published.
+    - A failed order writes no reservation record, so a redelivered `OrderPlaced` for it is evaluated again from scratch.
+    - `InventoryReserved` is published after the transaction commits. Its `data.reservedItems` is the incoming `data.items` array passed through unchanged: lines are not merged and any extra fields (such as `unitPrice`) are echoed.
+    - Payload guard: a payload that is not an object, or lacks the `correlationId` or `data` keys, is logged and skipped. The guard checks nothing deeper; see Known limitations.
+
+    ### OrderCancelled
+
+    - Payload guard: `correlationId` must be a string and `data` must be an object, otherwise the event is logged and skipped.
+    - Looks up the `OrderReservation` by `correlationId` and releases exactly the quantities stored there (not the event payload): `quantityAvailable` is incremented and `quantityReserved` decremented per product, then the record is marked `released`. All in one transaction.
+    - Release happens once. A repeat cancellation (`status: released`) or an unknown `correlationId` is logged and ignored.
+    - Nothing is published.
+
+    ### Database backstop
+
+    - CHECK constraint `Product_quantityAvailable_nonnegative` enforces `quantityAvailable >= 0` regardless of application code. There is no equivalent constraint on `quantityReserved`.
+
+    ## InventoryFailed reasons
+
+    `data.reason` is the message of whatever error aborted the reservation transaction. The two reasons the service
+    produces deliberately are:
+
+    ```text
+    Product <productId> does not exist
+    Insufficient stock for <name> (<productId>): requested <n>, available <m>
+    ```
+
+    For merged lines, `requested` is the summed quantity across all lines for that product. `available` is the value
+    read after the guarded update failed.
+
+    Any other thrown error is also published verbatim as the reason, for example a Prisma unique-constraint error
+    (see limitation 1) or a runtime `TypeError` from a structurally invalid payload (see limitation 5).
+
+    ## Example payloads
+
+    ### OrderPlaced (consumed)
+
+    ```json
+    {
+      "eventId": "73657fdc-8724-4d35-9ffb-0ede5270ab58",
+      "eventType": "OrderPlaced",
+      "correlationId": "d2e85030-5646-4fcf-952a-0ec74e47b791",
+      "timestamp": "2026-10-07T08:00:02.439Z",
+      "data": {
+        "orderId": "3bea976a-ec79-4ec6-bd45-b5c8a1794d27",
+        "items": [
+          {
+            "productId": "69002a34-146c-4517-8e3a-39f82e0154c0",
+            "quantity": 2,
+            "unitPrice": 2499
+          }
+        ]
+      }
+    }
+    ```
+
+    ### OrderCancelled (consumed)
+
+    Only `correlationId` is read. This example was published by hand during testing.
+
+    ```json
+    {
+      "eventId": "manual-test-1",
+      "eventType": "OrderCancelled",
+      "correlationId": "d2e85030-5646-4fcf-952a-0ec74e47b791",
+      "timestamp": "2026-10-07T08:10:00.000Z",
+      "data": {
+        "orderId": "3bea976a-ec79-4ec6-bd45-b5c8a1794d27",
+        "reason": "manual test"
+      }
+    }
+    ```
+
+    ### InventoryReserved (published)
+
+    ```json
+    {
+      "eventId": "897d831f-f5ee-4f3e-8edf-ebb7f0e067f4",
+      "eventType": "InventoryReserved",
+      "correlationId": "1e1bcce5-0580-4902-91ee-81737f1d7220",
+      "timestamp": "2026-09-28T22:27:20.999Z",
+      "data": {
+        "orderId": "7047e301-95dd-43e5-8aa9-46663e243c9f",
+        "reservedItems": [
+          {
+            "productId": "70d077d2-2fd6-4178-bd50-b670f174e360",
+            "quantity": 1,
+            "unitPrice": 1500
+          }
+        ]
+      }
+    }
+    ```
+
+    ### InventoryFailed (published)
+
+    ```json
+    {
+      "eventId": "fffbb193-d580-4e6b-b114-8f5eb16c65e2",
+      "eventType": "InventoryFailed",
+      "correlationId": "f71a239b-97ae-4dcf-a6a6-e5ba27d2bf23",
+      "timestamp": "2026-10-07T08:55:28.322Z",
+      "data": {
+        "orderId": "a01fe82c-1a6f-4320-9432-8253769cc02d",
+        "reason": "Insufficient stock for Duplicate Line Test (9c64896a-e9bf-4c89-8199-9e0a5feb2266): requested 4, available 3"
+      }
+    }
+    ```
+
+    ## Known limitations
+
+    1. Two simultaneous deliveries of the same `OrderPlaced` can both pass the duplicate check. The second then fails on the unique `correlationId` and publishes a misleading `InventoryFailed` whose reason is the raw Prisma error text. Stock stays correct because that transaction rolls back. Planned for Week 5.
+    2. Orders reserved before the `OrderReservation` table existed have no reservation record, so cancelling them does nothing.
+    3. Nothing publishes `OrderCancelled` automatically yet (Week 6). The handler was tested by publishing the event manually.
+    4. Failure reasons are free text, not machine-readable codes.
+    5. Line items are not validated. A missing or non-array `data.items` produces an `InventoryFailed` with a runtime error message. A zero or negative `quantity` passes the guarded update and moves stock the wrong way (it increases `quantityAvailable` and decreases `quantityReserved`).
+    6. Messages are acked even when processing throws (for example an `OrderCancelled` whose transaction fails), so such events are dropped with only a log line.
+    7. The `ProcessedEvent` table exists in the schema but is not used; deduplication is by `correlationId` via `OrderReservation`, not by `eventId`.
 servers:
   - url: http://localhost:5005
     description: Local development
@@ -20,6 +176,8 @@ paths:
     get:
       tags: [Health]
       summary: Confirms the service is running
+      description: |
+        Static liveness response. Does not check the database or RabbitMQ connection.
       responses:
         "200":
           description: Service is healthy
@@ -31,15 +189,16 @@ paths:
                   status:
                     type: string
                     example: ok
+              example:
+                status: ok
 
   /products:
     post:
       tags: [Products]
       summary: Create a new product
-      description: >
-        Creates a product with a real price and stock count. No hardcoded
-        or placeholder values are accepted — price and quantityAvailable
-        must be explicitly provided by the caller.
+      description: |
+        Creates a product with a real price and stock count. `price` and `quantityAvailable` must be provided
+        explicitly; there are no defaults. `quantityReserved` always starts at 0. Unknown body fields are ignored.
       requestBody:
         required: true
         content:
@@ -50,6 +209,7 @@ paths:
               properties:
                 name:
                   type: string
+                  minLength: 1
                   example: Wireless Mouse
                 price:
                   type: integer
@@ -76,69 +236,48 @@ paths:
                     type: string
                     example: ok
                   product:
-                    type: object
-                    properties:
-                      id:
-                        type: string
-                        format: uuid
-                      name:
-                        type: string
-                      price:
-                        type: integer
-                      quantityAvailable:
-                        type: integer
-                      quantityReserved:
-                        type: integer
-                      createdAt:
-                        type: string
-                        format: date-time
-                      updatedAt:
-                        type: string
-                        format: date-time
+                    $ref: "#/components/schemas/Product"
               example:
                 status: ok
                 product:
-                  id: 70d077d2-2fd6-4178-bd50-b670f174e360
+                  id: 69002a34-146c-4517-8e3a-39f82e0154c0
                   name: Wireless Mouse
                   price: 2499
                   quantityAvailable: 50
                   quantityReserved: 0
-                  createdAt: "2026-09-26T23:32:21.671Z"
-                  updatedAt: "2026-09-26T23:32:21.671Z"
+                  createdAt: "2026-09-26T22:10:27.664Z"
+                  updatedAt: "2026-09-26T22:10:27.664Z"
         "400":
-          description: Invalid request body (e.g. negative price, missing name)
+          description: |
+            Body failed Zod validation (for example a non-positive price or a missing name). One entry in `issues`
+            per failed field. A body that is not valid JSON is rejected earlier by Express's JSON parser and does
+            not use this shape.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: error
-                  message:
-                    type: string
-                  issues:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        path:
-                          type: string
-                        message:
-                          type: string
+                $ref: "#/components/schemas/ValidationError"
               example:
                 status: error
                 message: Invalid request body
                 issues:
                   - path: price
                     message: "price must be a positive integer (cents)"
+        "500":
+          description: Unexpected failure while saving the product. Details are logged server-side, not returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                status: error
+                message: Something went wrong creating the product.
 
     get:
       tags: [Products]
       summary: List all products
-      description: >
-        Returns every product, oldest first. Useful for a tester or client
-        to see real product IDs and prices to order against.
+      description: |
+        Returns every product ordered by `createdAt` ascending (oldest first). Not paginated. Useful for a tester
+        or client to see real product IDs and prices to order against.
       responses:
         "200":
           description: List of products
@@ -153,29 +292,90 @@ paths:
                   products:
                     type: array
                     items:
-                      type: object
-                      properties:
-                        id:
-                          type: string
-                          format: uuid
-                        name:
-                          type: string
-                        price:
-                          type: integer
-                        quantityAvailable:
-                          type: integer
-                        quantityReserved:
-                          type: integer
+                      $ref: "#/components/schemas/Product"
               example:
                 status: ok
                 products:
                   - id: 69002a34-146c-4517-8e3a-39f82e0154c0
                     name: Wireless Mouse
                     price: 2499
-                    quantityAvailable: 50
-                    quantityReserved: 0
+                    quantityAvailable: 46
+                    quantityReserved: 4
+                    createdAt: "2026-09-26T22:10:27.664Z"
+                    updatedAt: "2026-10-07T10:29:38.482Z"
                   - id: d297c43b-5884-4ea2-b958-e5519dfdedf4
                     name: 27-inch Monitor
                     price: 24999
                     quantityAvailable: 0
                     quantityReserved: 0
+                    createdAt: "2026-09-26T22:10:27.721Z"
+                    updatedAt: "2026-09-26T22:10:27.721Z"
+        "500":
+          description: Unexpected failure while reading products. Details are logged server-side, not returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                status: error
+                message: Something went wrong fetching products.
+
+components:
+  schemas:
+    Product:
+      type: object
+      required: [id, name, price, quantityAvailable, quantityReserved, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        price:
+          type: integer
+          description: Price in cents
+        quantityAvailable:
+          type: integer
+          minimum: 0
+          description: Stock free to reserve. Enforced >= 0 by a database CHECK constraint.
+        quantityReserved:
+          type: integer
+          description: Stock held by orders that reserved successfully and have not been cancelled.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      required: [status, message]
+      properties:
+        status:
+          type: string
+          enum: [error]
+        message:
+          type: string
+
+    ValidationError:
+      type: object
+      required: [status, message, issues]
+      properties:
+        status:
+          type: string
+          enum: [error]
+        message:
+          type: string
+          example: Invalid request body
+        issues:
+          type: array
+          items:
+            type: object
+            required: [path, message]
+            properties:
+              path:
+                type: string
+                description: Dot-joined path of the failing field
+              message:
+                type: string
