@@ -11,7 +11,7 @@
       "data": {
         "orderId": "uuid",
         "items": [
-          { "productId": "uuid", "quantity": 2 }
+          { "productId": "uuid", "quantity": 2, "unitPrice": 2499 }
         ]
       }
     }
@@ -29,7 +29,7 @@
       "data": {
         "orderId": "uuid",
         "reservedItems": [
-          { "productId": "uuid", "quantity": 2 }
+          { "productId": "uuid", "quantity": 2, "unitPrice": 2499 }
         ]
       }
     }
